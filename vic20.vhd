@@ -52,45 +52,51 @@ library ieee ;
   use ieee.numeric_std.all;
 
 entity VIC20 is
-  port (
-    --
-    i_sysclk     : in  std_logic;  -- comes from CLK_A via DCM (divided by 4)
-    i_sysclk_en  : in  std_logic;  -- 8.867236 MHz enable signal
-    i_reset      : in  std_logic;
-    -- serial bus pins
-    atn_o        : out std_logic; -- open drain
-    clk_o        : out std_logic; -- open drain
-    clk_i        : in  std_logic;
-    data_o       : out std_logic; -- open drain
-    data_i       : in  std_logic;
-    --
-    i_joy        : in  std_logic_vector(3 downto 0); -- 0 up, 1 down, 2 left,  3 right
-    i_fire       : in  std_logic;                    -- all low active
-    --
-    i_ram_ext_ro : in  std_logic_vector(4 downto 0); -- read-only region if set
-    i_ram_ext    : in  std_logic_vector(4 downto 0); -- at $A000(8k),$6000(8k),$4000(8k),$2000(8k),$0400(3k)
-    --
-	 o_ce_pix     : out std_logic;
-    o_video_r    : out std_logic_vector(3 downto 0);
-    o_video_g    : out std_logic_vector(3 downto 0);
-    o_video_b    : out std_logic_vector(3 downto 0);
-    o_hsync      : out std_logic;
-    o_vsync      : out std_logic;
-    o_hblank     : out std_logic;
-    o_vblank     : out std_logic;
-	 i_center     : in  std_logic_vector(1 downto 0);
-	 i_pal        : in  std_logic;
-    --
-    ps2_key      : in  std_logic_vector(10 downto 0);
-    --
-    o_audio      : out std_logic_vector(15 downto 0); -- runs at SYSCLK/SYSCLK_EN rate
+	port (
+		--
+		i_sysclk     : in  std_logic;  -- comes from CLK_A via DCM (divided by 4)
+		i_sysclk_en  : in  std_logic;  -- 8.867236 MHz enable signal
+		i_reset      : in  std_logic;
+		-- serial bus pins
+		atn_o        : out std_logic; -- open drain
+		clk_o        : out std_logic; -- open drain
+		clk_i        : in  std_logic;
+		data_o       : out std_logic; -- open drain
+		data_i       : in  std_logic;
+		--
+		i_joy        : in  std_logic_vector(3 downto 0); -- 0 up, 1 down, 2 left,  3 right
+		i_fire       : in  std_logic;                    -- all low active
+		--
+		i_ram_ext_ro : in  std_logic_vector(4 downto 0); -- read-only region if set
+		i_ram_ext    : in  std_logic_vector(4 downto 0); -- at $A000(8k),$6000(8k),$4000(8k),$2000(8k),$0400(3k)
+		--
+		o_ce_pix     : out std_logic;
+		o_video_r    : out std_logic_vector(3 downto 0);
+		o_video_g    : out std_logic_vector(3 downto 0);
+		o_video_b    : out std_logic_vector(3 downto 0);
+		o_hsync      : out std_logic;
+		o_vsync      : out std_logic;
+		o_hblank     : out std_logic;
+		o_vblank     : out std_logic;
+		i_center     : in  std_logic_vector(1 downto 0);
+		i_pal        : in  std_logic;
+		--
+		ps2_key      : in  std_logic_vector(10 downto 0);
+		--
+		o_audio      : out std_logic_vector(15 downto 0); -- runs at SYSCLK/SYSCLK_EN rate
 
-    --configures "embedded" core memory
-    conf_clk     : in  std_logic;
-    conf_wr      : in  std_logic;
-    conf_ai      : in  std_logic_vector(15 downto 0);
-    conf_di      : in  std_logic_vector(7 downto 0)
-    );
+		cass_write   : out std_logic;
+		cass_read    : in  std_logic;
+		cass_motor   : out std_logic;
+		cass_sw      : in  std_logic;
+
+		--configures "embedded" core memory
+		rom_std      : in  std_logic;
+		conf_clk     : in  std_logic;
+		conf_wr      : in  std_logic;
+		conf_ai      : in  std_logic_vector(15 downto 0);
+		conf_di      : in  std_logic_vector(7 downto 0)
+	);
 end;
 
 -- PAL version runs with a 8,867,236 Hz Quartz which is divided by two
@@ -120,6 +126,7 @@ signal vic_oe_l           : std_logic;
 signal vic_dout           : std_logic_vector( 7 downto 0);
 signal vic_din            : std_logic_vector(11 downto 0);
 signal p2_h               : std_logic;
+signal p2_hd              : std_logic;
 signal ena_1mhz           : std_logic;
 signal via1_dout          : std_logic_vector( 7 downto 0);
 signal via2_dout          : std_logic_vector( 7 downto 0);
@@ -152,8 +159,10 @@ signal col_ram_dout       : std_logic_vector(3 downto 0);
 -- rom
 signal char_rom_dout      : std_logic_vector(7 downto 0);
 signal basic_rom_dout     : std_logic_vector(7 downto 0);
-signal pal_rom_dout       : std_logic_vector(7 downto 0);
-signal ntsc_rom_dout      : std_logic_vector(7 downto 0);
+signal pal_rom_dout_dl    : std_logic_vector(7 downto 0);
+signal ntsc_rom_dout_dl   : std_logic_vector(7 downto 0);
+signal pal_rom_dout_o     : std_logic_vector(7 downto 0);
+signal ntsc_rom_dout_o    : std_logic_vector(7 downto 0);
 
 -- expansion
 signal expansion_din      : std_logic_vector(7 downto 0);
@@ -166,11 +175,6 @@ signal via1_pa_in         : std_logic_vector(7 downto 0);
 signal via1_pa_out        : std_logic_vector(7 downto 0);
 
 signal via2_irq_l         : std_logic;
-
-signal cass_write         : std_logic;
-signal cass_read          : std_logic;
-signal cass_motor         : std_logic;
-signal cass_sw            : std_logic;
 
 signal keybd_col_out      : std_logic_vector(7 downto 0);
 signal keybd_col_out_oe_l : std_logic_vector(7 downto 0);
@@ -209,12 +213,14 @@ signal vsync              : std_logic;
 signal reset_key          : std_logic;
 signal reset              : std_logic;
 
-signal iec_data_d1    : std_logic;
-signal iec_clk_d1     : std_logic;
-signal iec_data_d2    : std_logic;
-signal iec_clk_d2     : std_logic;
-signal iec_data       : std_logic;
-signal iec_clk        : std_logic;
+signal iec_data_d1        : std_logic;
+signal iec_clk_d1         : std_logic;
+signal iec_data_d2        : std_logic;
+signal iec_clk_d2         : std_logic;
+signal iec_data           : std_logic;
+signal iec_clk            : std_logic;
+
+signal motor              : std_logic;
 
 begin
 
@@ -247,10 +253,7 @@ begin
   -- <= user_port_out_oe_l
 
   -- tape
-  cass_read <= '0';
-  --<= cass_write;
-  --<= cass_motor
-  cass_sw <= '1'; -- sense casette buttons
+  cass_motor <= motor;
 
   -- serial
   serial_srq_in <= '1';
@@ -399,47 +402,38 @@ begin
           dout_o  => O_AUDIO
         );
 
-  via1 : entity work.M6522
-    port map (
-      CLK             => i_sysclk,
-      I_P2_H          => p2_h,
-      RESET_L         => reset_l_sampled,
-      ENA_4           => ena_4,
+	p2_hd <= p2_h when rising_edge(i_sysclk);
 
-      I_RS            => c_addr(3 downto 0),
-      I_DATA          => v_data(7 downto 0),
-      O_DATA          => via1_dout,
-      O_DATA_OE_L     => open,
+	via1: entity work.via6522
+	port map (
+		clock       => i_sysclk,
+		rising      => p2_hd and not p2_h,
+		falling     => not p2_hd and p2_h,
+		reset       => not reset_l_sampled,
 
-      I_RW_L          => c_rw_l,
-      I_CS1           => c_addr(4),
-      I_CS2_L         => io_sel_l(0),
+		addr        => c_addr(3 downto 0),
+		wen         => c_addr(4) and not io_sel_l(0) and not c_rw_l,
+		ren         => c_addr(4) and not io_sel_l(0) and c_rw_l,
+		data_in     => v_data(7 downto 0),
+		data_out    => via1_dout,
 
-      O_IRQ_L         => via1_nmi_l, -- note, not open drain
+		-- pio --
+		port_a_o    => via1_pa_out,
+		port_a_i    => via1_pa_in,
+		port_b_i    => user_port_in,
 
-      I_CA1           => keybd_restore,
-      I_CA2           => cass_motor,
-      O_CA2           => cass_motor,
-      O_CA2_OE_L      => open,
+		-- handshake pins
+		ca1_i       => keybd_restore,
 
-      I_PA            => via1_pa_in,
-      O_PA            => via1_pa_out,
-      O_PA_OE_L       => open,
+		ca2_o       => motor,
+		ca2_i       => motor,
 
-      -- port b
-      I_CB1           => user_port_cb1_in,
-      O_CB1           => open,
-      O_CB1_OE_L      => open,
+		cb1_i       => user_port_cb1_in,
+		cb2_i       => user_port_cb2_in,
 
-      I_CB2           => user_port_cb2_in,
-      O_CB2           => open,
-      O_CB2_OE_L      => open,
-
-      I_PB            => user_port_in,
-      O_PB            => open,
-      O_PB_OE_L       => open
-      );
-
+		irq_l       => via1_nmi_l
+	);
+    
   serial_atn_out_l <= via1_pa_out(7);
   via1_pa_in(7) <= serial_atn_in;
   via1_pa_in(6) <= cass_sw;
@@ -450,48 +444,41 @@ begin
   via1_pa_in(1) <= serial_data_in;
   via1_pa_in(0) <= serial_clk_in;
 
-  via2 : entity work.M6522
-    port map (
-      CLK             => I_SYSCLK,
-      I_P2_H          => p2_h,
-      RESET_L         => reset_l_sampled,
-      ENA_4           => ena_4,
+	via2: entity work.via6522
+	port map (
+		clock       => i_sysclk,
+		rising      => p2_hd and not p2_h,
+		falling     => not p2_hd and p2_h,
+		reset       => not reset_l_sampled,
 
-      I_RS            => c_addr(3 downto 0),
-      I_DATA          => v_data(7 downto 0),
-      O_DATA          => via2_dout,
-      O_DATA_OE_L     => open,
+		addr        => c_addr(3 downto 0),
+		wen         => c_addr(5) and not io_sel_l(0) and not c_rw_l,
+		ren         => c_addr(5) and not io_sel_l(0) and c_rw_l,
+		data_in     => v_data(7 downto 0),
+		data_out    => via2_dout,
 
-      I_RW_L          => c_rw_l,
-      I_CS1           => c_addr(5),
-      I_CS2_L         => io_sel_l(0),
+		-- pio --
+		port_a_o    => keybd_row_out,
+		port_a_t_l  => keybd_row_out_oe_l,
+		port_a_i    => keybd_row_in(0)&keybd_row_in(6 downto 1)&keybd_row_in(7),
 
-      O_IRQ_L         => via2_irq_l, -- note, not open drain
+		port_b_o    => keybd_col_out,
+		port_b_t_l  => keybd_col_out_oe_l,
+		port_b_i    => (joy(3) and keybd_col_in(3))&keybd_col_in(6 downto 4)&keybd_col_in(7)&keybd_col_in(2 downto 0),
 
-      I_CA1           => cass_read,
-      I_CA2           => serial_clk_out_l,
-      O_CA2           => serial_clk_out_l,
-      O_CA2_OE_L      => open,
+		-- handshake pins
+		ca1_i       => cass_read,
 
-      I_PA            => keybd_row_in(0)&keybd_row_in(6 downto 1)&keybd_row_in(7),
-      O_PA            => keybd_row_out,
-      O_PA_OE_L       => keybd_row_out_oe_l,
+		ca2_o       => serial_clk_out_l,
+		ca2_i       => serial_clk_out_l,
+		cb1_i       => serial_srq_in,
+		cb2_o       => serial_data_out_l,
+		cb2_i       => serial_data_out_l,
 
-      -- port b
-      I_CB1           => serial_srq_in,
-      O_CB1           => open,
-      O_CB1_OE_L      => open,
+		irq_l       => via2_irq_l
+	);
 
-      I_CB2           => serial_data_out_l,
-      O_CB2           => serial_data_out_l,
-      O_CB2_OE_L      => open,
-
-      I_PB            => (joy(3) and keybd_col_in(3))&keybd_col_in(6 downto 4)&keybd_col_in(7)&keybd_col_in(2 downto 0),
-      O_PB            => keybd_col_out,
-      O_PB_OE_L       => keybd_col_out_oe_l
-      );
-
-  --	cass_write <= keybd_col_out(3);
+  cass_write <= keybd_col_out(3);
   keybd_row_out_s <= keybd_row_out or keybd_row_out_oe_l;
   keybd_col_out_s <= keybd_col_out or keybd_col_out_oe_l;
 
@@ -657,7 +644,7 @@ begin
 
   p_cpu_read_mux : process(p2_h, c_addr, io_sel_l, ram_sel_l, blk_sel_l,
                            v_data_read_mux, via1_dout, via2_dout, v_data_oe_l,
-                           basic_rom_dout, i_pal, pal_rom_dout, ntsc_rom_dout, expansion_din,
+                           basic_rom_dout, i_pal, pal_rom_dout_dl, ntsc_rom_dout_dl, pal_rom_dout_o, ntsc_rom_dout_o, expansion_din,
 									I_RAM_EXT, ramex0_dout, ramex1_dout, ramex2_dout, ramex3_dout, cart_dout)
   begin
 
@@ -670,9 +657,9 @@ begin
     elsif (blk_sel_l(6) = '0') then
       c_din <= basic_rom_dout;
     elsif (blk_sel_l(7) = '0' and i_pal = '1') then
-      c_din <= pal_rom_dout;
+      c_din <= pal_rom_dout_dl and pal_rom_dout_o;
     elsif (blk_sel_l(7) = '0') then
-      c_din <= ntsc_rom_dout;
+      c_din <= ntsc_rom_dout_dl and ntsc_rom_dout_o;
     elsif (v_data_oe_l = '0') then
       c_din <= v_data_read_mux;
     elsif (ram_sel_l(1) and ram_sel_l(2) and ram_sel_l(3))='0' and I_RAM_EXT(0)='1' then
@@ -888,7 +875,8 @@ begin
     port map (
 		rdclock   => i_sysclk,
       rdaddress => c_addr(12 downto 0),
-      q         => pal_rom_dout,
+      q         => pal_rom_dout_dl,
+		cs        => not rom_std,
 
       wrclock   => conf_clk,
       wraddress => conf_ai,
@@ -901,7 +889,8 @@ begin
     port map (
 		rdclock   => i_sysclk,
       rdaddress => c_addr(12 downto 0),
-      q         => ntsc_rom_dout,
+      q         => ntsc_rom_dout_dl,
+		cs        => not rom_std,
 
       wrclock   => conf_clk,
       wraddress => conf_ai,
@@ -909,6 +898,26 @@ begin
       data      => conf_di
     );
 
+  kernal_rom_pal_o : entity work.gen_rom
+    generic map ("roms/kernal.901486-07.mif", 13)
+    port map (
+		wrclock   => i_sysclk,
+		rdclock   => i_sysclk,
+      rdaddress => c_addr(12 downto 0),
+      q         => pal_rom_dout_o,
+		cs        => rom_std
+    );
+
+  kernal_rom_ntsc_o : entity work.gen_rom
+    generic map ("roms/kernal.901486-06.mif", 13)
+    port map (
+		wrclock   => i_sysclk,
+		rdclock   => i_sysclk,
+      rdaddress => c_addr(12 downto 0),
+      q         => ntsc_rom_dout_o,
+		cs        => rom_std
+    );
+	 
   p_video_output : process
   begin
     wait until rising_edge(i_sysclk);
